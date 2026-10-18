@@ -1,6 +1,7 @@
 """Offline contract/safety tests. No Microsoft or Keychain calls.
 source_agent=claude-code; machine=mac-mini
 """
+import itertools
 import json
 import io
 from pathlib import Path
@@ -185,6 +186,62 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(statuses, [400, 303, 200])
         self.assertEqual(vault.value["access_token"], "MOCK_PRIVATE_TOKEN")
         self.assertNotIn("MOCK_PRIVATE", output.getvalue())
+
+
+class SignInGuidanceTests(unittest.TestCase):
+    """Users at another organization get plain guidance, never Microsoft's raw description."""
+
+    def test_hint_for_known_unknown_and_missing_codes(self):
+        self.assertIn("管理者", app.signin_hint("AADSTS65001: consent required"))
+        self.assertIn("自分の会社のアカウント", app.signin_hint("AADSTS50020"))
+        self.assertIn("テナントID", app.signin_hint("AADSTS50194"))
+        self.assertIn("困ったとき", app.signin_hint("AADSTS999999: other"))
+        self.assertEqual(app.signin_hint(""), "")
+
+    def test_browser_callback_error_shows_code_and_guidance_only(self):
+        output = io.StringIO()
+        class FakeServer:
+            def __init__(server, bind, handler):
+                server.handler = handler
+            def handle_request(server):
+                url = output.getvalue().splitlines()[0].split(": ", 1)[1]
+                state = app.parse.parse_qs(app.parse.urlsplit(url).query)["state"][0]
+                handler = object.__new__(server.handler)
+                handler.headers = {"Host": "localhost:8765"}
+                handler.send_error = handler.send_response = lambda *args: None
+                handler.send_header = lambda *args: None
+                handler.end_headers = lambda: None
+                handler.path = "/callback?" + app.parse.urlencode({"state": state, "error": "access_denied",
+                    "error_description": "AADSTS65001: not consented. Trace ID: MOCK-TRACE-ID"})
+                handler.do_GET()
+            def server_close(server):
+                pass
+        with patch("onenote.HTTPServer", FakeServer), patch("sys.stdout", output), \
+                patch("onenote.time.monotonic", side_effect=itertools.count(0, 2)):
+            with self.assertRaises(app.UserError) as caught:
+                app.Auth(CFG, MemoryVault({}), lambda *args: self.fail("no token request")).login_browser()
+        self.assertIn("AADSTS65001", str(caught.exception))
+        self.assertIn("管理者", str(caught.exception))
+        self.assertNotIn("MOCK-TRACE-ID", str(caught.exception))
+
+    def test_token_endpoint_error_number_is_kept_without_description(self):
+        body = json.dumps({"error": "invalid_grant", "error_codes": [65001],
+                           "error_description": "AADSTS65001: Trace ID: MOCK-TRACE-ID"}).encode()
+        failure = app.error.HTTPError("https://login.microsoftonline.com/x", 400, "Bad Request", {}, io.BytesIO(body))
+        with patch("onenote.request.build_opener") as opener:
+            opener.return_value.open.side_effect = failure
+            with self.assertRaises(app.ApiError) as caught:
+                app.http("POST", "https://login.microsoftonline.com/x")
+        self.assertEqual((caught.exception.code, caught.exception.aadsts), ("invalid_grant", "AADSTS65001"))
+        self.assertNotIn("MOCK-TRACE-ID", str(caught.exception))
+
+    def test_refresh_failure_adds_guidance(self):
+        def transport(*args):
+            raise app.ApiError(400, "invalid_grant", aadsts="AADSTS700082")
+        auth = app.Auth(CFG, MemoryVault({"access_token": "x", "refresh_token": "y", "expires_at": 0}), transport)
+        with self.assertRaises(app.UserError) as caught:
+            auth.token()
+        self.assertIn("AADSTS700082", str(caught.exception))
 
 
 if __name__ == "__main__":

@@ -40,9 +40,35 @@ class UserError(Exception):
 
 
 class ApiError(UserError):
-    def __init__(self, status, code, retry_after=None):
-        self.status, self.code, self.retry_after = status, code, retry_after
+    def __init__(self, status, code, retry_after=None, aadsts=""):
+        self.status, self.code, self.retry_after, self.aadsts = status, code, retry_after, aadsts
         super().__init__("HTTP {} / {}".format(status, code))
+
+
+# Sign-in errors that users at another organization are likely to hit. Only the code
+# and this guidance are shown; Microsoft's description (trace IDs etc.) is not printed.
+NEEDS_ADMIN = "この会社ではまだこのツールが許可されていません。会社の管理者に、READMEの「会社の管理者の許可」を1回行ってもらってください。"
+SHARED_APP = "配る人のアプリIDを使っている場合は、配る人の登録が他社向けになっていません（docs/distribution.md）。"
+SIGNIN_HINTS = {
+    "AADSTS65001": NEEDS_ADMIN,
+    "AADSTS90094": NEEDS_ADMIN,
+    "AADSTS90095": NEEDS_ADMIN,
+    "AADSTS65004": "許可の画面でキャンセルされました。もう一度loginし、内容を確かめて承諾してください。",
+    "AADSTS50020": "アプリを登録した会社とは別の会社（または個人）のアカウントでサインインしています。自分の会社のアカウントを選び直してください。" + SHARED_APP,
+    "AADSTS50194": ".envのONENOTE_TENANTがorganizationsです。自分の会社で登録したアプリなら、テナントIDを書いてください。" + SHARED_APP,
+    "AADSTS700016": "このアプリIDが見つかりません。.envのONENOTE_CLIENT_IDとONENOTE_TENANTの写し間違い（組み合わせ違い）を確かめてください。" + SHARED_APP,
+    "AADSTS50011": "リダイレクトURIが違います。アプリの登録で、モバイルとデスクトップの種類に http://localhost:8765/callback があるか確かめてください。",
+    "AADSTS53003": "会社のセキュリティ設定（条件付きアクセス）で止められました。会社の管理者に確認してください。",
+    "AADSTS700082": "ログインの期限が切れました。loginし直してください。",
+}
+
+
+def signin_hint(text):
+    """Plain guidance for the first AADSTS code in text; empty when there is none."""
+    match = re.search(r"AADSTS\d{5,6}", text or "")
+    if not match:
+        return ""
+    return match.group(0) + "：" + SIGNIN_HINTS.get(match.group(0), "READMEの「困ったとき」を確認してください。")
 
 
 class GraphError(UserError):
@@ -66,18 +92,21 @@ def http(method, url, headers=None, data=None):
                 raise UserError("応答が16MBを超えました。対象ページを小さくしてください。")
             return body.decode("utf-8")
     except error.HTTPError as exc:
-        code = "request_failed"
+        code, aadsts = "request_failed", ""
         try:
             obj = json.loads(exc.read(65536))
             item = obj.get("error", "request_failed")
             candidate = item.get("code", "request_failed") if isinstance(item, dict) else item
             if isinstance(candidate, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", candidate):
                 code = candidate
+            numbers = obj.get("error_codes")
+            if isinstance(numbers, list) and numbers and type(numbers[0]) is int and 0 < numbers[0] < 10 ** 6:
+                aadsts = "AADSTS" + str(numbers[0])
         except (ValueError, AttributeError):
             pass
         raw_retry = exc.headers.get("Retry-After", "")
         retry = int(raw_retry) if raw_retry.isdigit() else None
-        raise ApiError(exc.code, code, retry) from None
+        raise ApiError(exc.code, code, retry, aadsts) from None
     except (error.URLError, TimeoutError, OSError):
         raise UserError("通信に失敗しました。ネットワーク/TLSを確認してください。書き込みは自動再送していません。") from None
 
@@ -651,7 +680,8 @@ class Auth:
                 if exc.code == "slow_down":
                     interval += 5
                     continue
-                raise UserError("認証を完了できませんでした: " + exc.code) from None
+                raise UserError(" ".join(filter(None, ["認証を完了できませんでした: " + exc.code,
+                                                        signin_hint(exc.aadsts)]))) from None
         raise UserError("ログインの有効時間が切れました。loginを再実行してください。")
 
     def login_browser(self):
@@ -678,7 +708,8 @@ class Auth:
                         self.send_error(400, "Invalid state")
                         return
                     if params.get("error"):
-                        received["error"] = "Microsoftで認証が拒否または中断されました。"
+                        received["error"] = " ".join(filter(None, ["Microsoftで認証が拒否または中断されました。",
+                            signin_hint(params.get("error_description", [""])[0])]))
                     elif params.get("code"):
                         received["code"] = params["code"][0]
                     else:
@@ -726,8 +757,12 @@ class Auth:
             raise UserError(received["error"])
         if not received.get("code"):
             raise UserError("ログイン待ちが終了しました。loginを再実行してください。")
-        result = self.post("token", {"grant_type": "authorization_code", "code": received["code"],
-                                   "redirect_uri": redirect_uri, "code_verifier": verifier, "scope": self.scope})
+        try:
+            result = self.post("token", {"grant_type": "authorization_code", "code": received["code"],
+                                       "redirect_uri": redirect_uri, "code_verifier": verifier, "scope": self.scope})
+        except ApiError as exc:
+            raise UserError(" ".join(filter(None, ["認証を完了できませんでした（" + exc.code + "）。",
+                                                    signin_hint(exc.aadsts)]))) from None
         self.remember(result)
         print(LOGIN_DONE)
 
@@ -741,7 +776,8 @@ class Auth:
             result = self.post("token", {"grant_type": "refresh_token",
                 "refresh_token": cached["refresh_token"], "scope": self.scope})
         except ApiError as exc:
-            raise UserError("認証更新に失敗しました（" + exc.code + "）。loginを再実行してください。") from None
+            raise UserError(" ".join(filter(None, ["認証更新に失敗しました（" + exc.code + "）。loginを再実行してください。",
+                                                    signin_hint(exc.aadsts)]))) from None
         return self.remember(result, cached)
 
 
@@ -1137,6 +1173,8 @@ def main():
             cfg = check_config(dict(saved, **env))
         except UserError as exc:
             raise UserError(str(exc) + (" configureは--configのJSONだけに保存し、--env-fileの値はコピーしません。"
+                                        ".envだけで使う場合は、.envの「# ONENOTE_SECTION_ID=」の行を"
+                                        "「ONENOTE_SECTION_ID=セクションID」に書き換えてください。"
                                         if env else "")) from None
         for item in (saved, cfg):
             if item["auth_store"] == "file":
