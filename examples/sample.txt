@@ -1,0 +1,3 @@
+Claude CodeからのOneNote接続テスト
+これは架空データです。
+確認事項：OneNoteに書き出した文章を、Microsoft Graph APIで再び読み込めるか。

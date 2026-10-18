@@ -1,0 +1,29 @@
+# Local configuration and runtime data (never commit)
+config.local.json
+config.local.json.tmp-*
+demo-result.json
+demo-vault/
+.onenote-sync/
+.env
+.env.*
+*.env
+!.env.example
+# File token cache (auth_store=file). Kept outside the repository by default and
+# refused inside Git checkouts; these patterns also cover custom cache folders.
+onenote-token-*.json
+.onenote-token-*
+token-cache/
+auth.json
+credentials.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.keychain*
+# Development artifacts
+__pycache__/
+*.pyc
+.DS_Store
+test-results/
+.venv/
+venv/
