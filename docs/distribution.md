@@ -2,7 +2,7 @@
 source_agent: claude-code
 machine: macbook-air
 created: 2026-10-18
-updated: 2026-10-18
+updated: 2026-10-20
 status: other_org_unverified
 ---
 
@@ -17,9 +17,13 @@ status: other_org_unverified
 ```
 OneNoteをClaude Codeから使うための設定です。Claude Codeに次の文を貼ってください。
 
-https://github.com/zenbuai-tech/ClaudeOneNoteGraph-public のREADMEに従って、私の会社のOneNoteに接続する設定をしてください。画面の操作とログインは私がやるので、1つずつ案内してください。
+次の手順で、私の会社のOneNoteに接続する設定をしてください。
+1. https://github.com/zenbuai-tech/ClaudeOneNoteGraph-public のREADMEの「はじめての設定（Windows）」の手順1・2に従って、PythonとGitを確かめ、プログラムをユーザーフォルダの直下（C:\Users\私の名前\ClaudeOneNoteGraph）に取り込んでください。
+2. 取り込んだら、そのフォルダの README.md を最初から最後まで読み、その手順どおりに進めてください。
 
-途中で、御社のMicrosoft Entraでこのプログラムを登録する手順があります（5分ほど）。ご自身で登録できない場合は、御社の情報システム担当の方に、READMEの手順3を頼んでください。
+画面の操作とログインは私がやるので、1つずつ案内してください。
+
+途中で、Claude Codeを開き直す場面があります（開き直したあとに貼る文は、案内に出ます）。また、御社のMicrosoft Entraでこのプログラムを登録する手順があります（5分ほど）。ご自身で登録できない場合は、御社の情報システム担当の方に、READMEの手順3を頼んでください。
 ```
 
 ## 保険：自社の登録を「他社でも使える」ようにしておく
