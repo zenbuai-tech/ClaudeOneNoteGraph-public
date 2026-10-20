@@ -302,7 +302,7 @@ def frontmatter(meta, section, body, warnings, machine):
     title = meta.get('title') or 'Untitled'
     props = {
         'type': 'knowledge', 'layer': 'working', 'marking': 'internal',
-        'purpose': ['demo', 'reference'], 'owner': 'masanori',
+        'purpose': ['demo', 'reference'],
         'source_agent': 'claude-code', 'machine': machine, 'status': 'mirror',
         'summary': 'OneNote reference copy: ' + title, 'created': meta.get('createdDateTime') or now(),
         'aliases': [title], 'onenote_page_id': meta['id'], 'onenote_section_id': section,

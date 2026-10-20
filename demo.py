@@ -84,7 +84,6 @@ type: knowledge
 layer: working
 marking: internal
 purpose: [demo]
-owner: masanori
 source_agent: claude-code
 machine: MACHINE_PLACEHOLDER
 created: 2026-09-22
